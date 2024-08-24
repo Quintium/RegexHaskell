@@ -109,15 +109,16 @@ removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
     enfa = ENFA qs t q0 f
 
 -- one nfa iteration, from the current states to the states after reading "a"
-next :: NFA -> [Int] -> Int -> [Int]
-next (NFA qs t q0 f) set a = removeDupQ qs $ concatMap (adjList' !) set
-    where 
-        -- TODO: extract these computations to "accepts" to improve performance
-        adjList' = fmap (map snd . filter (\(b, _) -> a == b)) adjList
-        adjList = adjacencyList (ENFA qs t q0 f)
+next :: NFA -> Array Int (Array Int [Int]) -> [Int] -> Int -> [Int]
+next (NFA qs t q0 f) alphAdjList [] a = [] -- optimization, technically not needed
+next (NFA qs t q0 f) alphAdjList set a = removeDupQ qs $ concatMap (alphAdjList ! a !) set
 
 accepts :: NFA -> [Int] -> Bool
-accepts (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next (NFA qs t q0 f)) [q0] w
+accepts (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next (NFA qs t q0 f) alphAdjList) [q0] w
+    where 
+        -- alphAdjList ! a ! q = all states that can be reached from q with a
+        alphAdjList = array (0, length ascii-1) [(a, accumArray (flip (:)) [] (0, qs-1) (alphLists ! a)) | a <- [0..length ascii-1]]
+        alphLists = accumArray (flip (:)) [] (0, length ascii-1) [(a, (r1, r2)) | (r1, a, r2) <- t] 
 
 epsAccepts :: ENFA -> [Int] -> Bool
 epsAccepts nfa = accepts (removeEpsilons nfa)
