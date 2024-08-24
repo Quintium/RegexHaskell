@@ -3,12 +3,72 @@ import Data.Array
 import Data.Maybe
 import Control.Monad.State
 
+-- Plus - union, Times - Concatenation, star - Kleene-star
+data Regex = Empty | Epsilon | Single Int | Plus Regex Regex | Times Regex Regex | Star Regex deriving (Show)
+
+ascii :: [Char]
+ascii = " !\"#$%&'()*+,−./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
+specialChars :: [Char]
+specialChars = "()+*"
+
+charAscii :: Char -> Int
+charAscii c = fromJust $ elemIndex c ascii
+
+stringAscii :: String -> [Int]
+stringAscii = map charAscii
+
+data RegexChar = Special Char | Normal Char
+
+regexString :: String -> [RegexChar]
+regexString "" = []
+regexString "!" = []
+regexString ('!':c:s) = Normal c : regexString s
+regexString (c:s) | c `elem` specialChars = Special c : regexString s
+                  | otherwise = Normal c : regexString s
+
+data ParseToken = LBracket | PlusT | TimesT | Ex Regex deriving (Show)
+parseRegexChar :: RegexChar -> [ParseToken] -> Maybe [ParseToken]
+parseRegexChar (Special '(') [] = Just [LBracket]
+parseRegexChar (Special '(') (LBracket : ts) = Just (LBracket : LBracket : ts)
+parseRegexChar (Special '(') (PlusT : ts) = Just (LBracket : PlusT : ts)
+parseRegexChar (Special '(') (TimesT : ts) = Just (LBracket : TimesT : ts)
+parseRegexChar (Special '(') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
+parseRegexChar (Special '(') (Ex reg2 : TimesT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special '(') (Ex reg : ts) = Just (LBracket : TimesT : (Ex reg : ts))
+
+parseRegexChar (Special '*') (Ex reg : ts) = Just (Ex (Star reg) : ts)
+parseRegexChar (Special '*') _ = Nothing
+
+parseRegexChar (Special '+') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (PlusT : Ex (Plus reg1 reg2) : ts)
+parseRegexChar (Special '+') (Ex reg2 : TimesT : Ex reg1 : ts) = Just (PlusT : Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special '+') (Ex reg : ts) = Just (PlusT : Ex reg : ts)
+parseRegexChar (Special '+')_ = Nothing
+
+parseRegexChar (Special ')') (LBracket : ts) = Just (Ex Epsilon : ts)
+parseRegexChar (Special ')') (Ex reg : LBracket : ts) = Just (Ex reg : ts)
+parseRegexChar (Special ')') (Ex reg3 : TimesT : Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 (Times reg2 reg3)) : ts)
+parseRegexChar (Special ')') (Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 reg2) : ts)
+parseRegexChar (Special ')') (Ex reg2 : TimesT : Ex reg1 : LBracket : ts) = Just (Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special ')') _ = Nothing
+
+parseRegexChar (Normal c) [] = Just [Ex (Single (charAscii c))]
+parseRegexChar (Normal c) (LBracket : ts) = Just (Ex (Single (charAscii c)) : LBracket : ts)
+parseRegexChar (Normal c) (PlusT : ts) = Just (Ex (Single (charAscii c)) : PlusT : ts)
+parseRegexChar (Normal c) (TimesT : ts) = Just (Ex (Single (charAscii c)) : TimesT : ts)
+parseRegexChar (Normal c) (Ex reg2 : PlusT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
+parseRegexChar (Normal c) (Ex reg2 : TimesT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex (Times reg1 reg2) : ts)
+parseRegexChar (Normal c) (Ex reg : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg : ts)
+
+parseRegex :: String -> Maybe Regex
+parseRegex s = case stack of
+    Just [Ex reg] -> Just reg
+    _ -> Nothing
+    where stack = foldl (\ts c -> ts >>= parseRegexChar c) (Just []) (regexString $ "(" ++ s ++ ")")
+
 -- epsilon-NFA, ENFA (qs - number of states) (t - transitions in the form of (q1, a, q2)) (q0 - start state) (f - finish states) 
 data ENFA = ENFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- epsilon-NFA, epsilon represented by -1
 data NFA = NFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- NFA, no epsilon allowed
-
--- Plus - union, Times - Concatenation, star - Kleene-star
-data Regex = Empty | Epsilon | Single Int | Plus Regex Regex | Times Regex Regex | Star Regex deriving (Show)
 
 -- epsNFAs for regex blocks
 
@@ -85,7 +145,7 @@ dfs adjList q = do
             mapM_ (\(a, r2) -> when (a == epsilon) $ dfs adjList r2) (adjList ! q)
         )
 
--- removes duplicates/calculates intersection in a list of states with good performance
+-- removes duplicates/calculates intersection in a list of states with good asymptotic performance
 
 removeDupQ :: Int -> [Int] -> [Int]
 removeDupQ qs as = filter (arr !) [0..qs-1]
@@ -113,103 +173,12 @@ next :: NFA -> Array Int (Array Int [Int]) -> [Int] -> Int -> [Int]
 next (NFA qs t q0 f) alphAdjList [] a = [] -- optimization, technically not needed
 next (NFA qs t q0 f) alphAdjList set a = removeDupQ qs $ concatMap (alphAdjList ! a !) set
 
-accepts :: NFA -> [Int] -> Bool
-accepts (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next (NFA qs t q0 f) alphAdjList) [q0] w
+match :: NFA -> [Int] -> Bool
+match (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next (NFA qs t q0 f) alphAdjList) [q0] w
     where 
         -- alphAdjList ! a ! q = all states that can be reached from q with a
         alphAdjList = array (0, length ascii-1) [(a, accumArray (flip (:)) [] (0, qs-1) (alphLists ! a)) | a <- [0..length ascii-1]]
         alphLists = accumArray (flip (:)) [] (0, length ascii-1) [(a, (r1, r2)) | (r1, a, r2) <- t] 
 
-epsAccepts :: ENFA -> [Int] -> Bool
-epsAccepts nfa = accepts (removeEpsilons nfa)
-
-fits :: String -> String -> Maybe Bool
-fits regS s = do
-    reg <- parseRegex regS
-    let enfa = regexENFA reg
-    return $ epsAccepts enfa (stringAscii s)
-
-searchNext :: NFA -> ([(Int, Int)], Int) -> Int -> ([(Int, Int)], Int)
-searchNext (NFA qs t q0 f) (set, n) a = (nubBy (\(r1, n1) (r2, n2) -> r1 == r2) mapped, n+1)
-    where mapped = map (\(r1, a, r2) -> (r2, if r1 == q0 then n else snd $ head $ filter (\(r, a) -> r == r1) set)) filtered
-          filtered = filter (\(r1, b, r2) -> a == b && any (\(r, a) -> r == r1) set) t
-
-takeWhilePlusOne :: (a -> Bool) -> [a] -> [a]
-takeWhilePlusOne pred [] = []
-takeWhilePlusOne pred (x:xs) | pred x = x : takeWhilePlusOne pred xs
-                             | otherwise = [x]
-
-nfaSearch :: NFA -> [Int] -> Maybe (Int, Int)
-nfaSearch (NFA qs t q0 f) w = if not $ pred res then Just ((snd . head) $ filter (\(q, n) -> q `elem` f) (fst res), snd res) else Nothing
-    where
-        res = last $ takeWhilePlusOne pred $ scanl (searchNext (NFA qs t q0 f)) ([(q0, 0)], 0) w
-        pred (set, n) = null (map fst set `intersect` f)
-
-enfaSearch :: ENFA -> [Int] -> Maybe (Int, Int)
-enfaSearch nfa = nfaSearch (removeEpsilons nfa)
-
-search :: String -> String -> Either String (String, (Int, Int))
-search regS s = maybe (Left "Parse error") searchReg (parseRegex regS)
-    where searchReg reg = maybe (Left "No occurrence") (\(a, b) -> Right (drop a $ take b s, (a, b))) (enfaSearch enfa (stringAscii s))
-            where enfa = ENFA qs (map (q0,, q0) [0..length ascii] ++ t) q0 f -- construction assuming q0 is not reachable from q0
-                    where (ENFA qs t q0 f) = regexENFA reg 
-
-ascii :: [Char]
-ascii = " !\"#$%&'()*+,−./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-
-specialChars :: [Char]
-specialChars = "()+*"
-
-charAscii :: Char -> Int
-charAscii c = fromJust $ elemIndex c ascii
-
-stringAscii :: String -> [Int]
-stringAscii = map charAscii
-
-data RegexChar = Special Char | Normal Char
-
-regexString :: String -> [RegexChar]
-regexString "" = []
-regexString "!" = []
-regexString ('!':c:s) = Normal c : regexString s
-regexString (c:s) | c `elem` specialChars = Special c : regexString s
-                  | otherwise = Normal c : regexString s
-
-data ParseToken = LBracket | PlusT | TimesT | Ex Regex deriving (Show)
-parseRegexChar :: RegexChar -> [ParseToken] -> Maybe [ParseToken]
-parseRegexChar (Special '(') [] = Just [LBracket]
-parseRegexChar (Special '(') (LBracket : ts) = Just (LBracket : LBracket : ts)
-parseRegexChar (Special '(') (PlusT : ts) = Just (LBracket : PlusT : ts)
-parseRegexChar (Special '(') (TimesT : ts) = Just (LBracket : TimesT : ts)
-parseRegexChar (Special '(') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
-parseRegexChar (Special '(')(Ex reg2 : TimesT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex (Times reg1 reg2) : ts)
-parseRegexChar (Special '(') (Ex reg : ts) = Just (LBracket : TimesT : (Ex reg : ts))
-
-parseRegexChar (Special '*') (Ex reg : ts) = Just (Ex (Star reg) : ts)
-parseRegexChar (Special '*') _ = Nothing
-
-parseRegexChar (Special '+') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (PlusT : Ex (Plus reg1 reg2) : ts)
-parseRegexChar (Special '+') (Ex reg2 : TimesT : Ex reg1 : ts) = Just (PlusT : Ex (Times reg1 reg2) : ts)
-parseRegexChar (Special '+') (Ex reg : ts) = Just (PlusT : Ex reg : ts)
-parseRegexChar (Special '+')_ = Nothing
-
-parseRegexChar (Special ')') (LBracket : ts) = Just (Ex Epsilon : ts)
-parseRegexChar (Special ')') (Ex reg : LBracket : ts) = Just (Ex reg : ts)
-parseRegexChar (Special ')') (Ex reg3 : TimesT : Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 (Times reg2 reg3)) : ts)
-parseRegexChar (Special ')') (Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 reg2) : ts)
-parseRegexChar (Special ')') (Ex reg2 : TimesT : Ex reg1 : LBracket : ts) = Just (Ex (Times reg1 reg2) : ts)
-parseRegexChar (Special ')') _ = Nothing
-
-parseRegexChar (Normal c) [] = Just [Ex (Single (charAscii c))]
-parseRegexChar (Normal c) (LBracket : ts) = Just (Ex (Single (charAscii c)) : LBracket : ts)
-parseRegexChar (Normal c) (PlusT : ts) = Just (Ex (Single (charAscii c)) : PlusT : ts)
-parseRegexChar (Normal c) (TimesT : ts) = Just (Ex (Single (charAscii c)) : TimesT : ts)
-parseRegexChar (Normal c) (Ex reg2 : PlusT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
-parseRegexChar (Normal c) (Ex reg2 : TimesT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex (Times reg1 reg2) : ts)
-parseRegexChar (Normal c) (Ex reg : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg : ts)
-
-parseRegex :: String -> Maybe Regex
-parseRegex s = case stack of
-    Just [Ex reg] -> Just reg
-    _ -> Nothing
-    where stack = foldl (\ts c -> ts >>= parseRegexChar c) (Just []) (regexString $ "(" ++ s ++ ")")
+epsMatch :: ENFA -> [Int] -> Bool
+epsMatch nfa = match (removeEpsilons nfa)
