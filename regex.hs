@@ -75,7 +75,7 @@ removeDup qs as = filter (arr !) [0..qs-1]
 removeEpsilons :: ENFA -> NFA
 removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
   where
-    t' = concatMap (\(r1, a, r2) -> [(r1', a, r2') | r1' <- backwardList ! r1, r2' <- forwardList ! r2]) t
+    t' = concatMap (\(r1, a, r2) -> [(r1', a, r2') | r1' <- backwardList ! r1, r2' <- forwardList ! r2]) $ filter (\(r1, a, r2) -> a /= epsilon) t
     f' = removeDup qs $ concatMap (backwardList !) f
 
     forwardList = array (0,qs-1) [(q, filter (\r -> allPairs ! q ! r) [0..qs-1]) | q <- [0..qs-1]]
