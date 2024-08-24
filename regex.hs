@@ -3,8 +3,9 @@ import Data.Array
 import Data.Maybe
 import Control.Monad.State
 
-data ENFA = ENFA Int [(Int, Int, Int)] Int [Int] deriving (Show)
-data NFA = NFA Int [(Int, Int, Int)] Int [Int] deriving (Show)
+-- epsilon-NFA, ENFA (qs - number of states) (t - transitions in the form of (q1, a, q2)) (q0 - start state) (f - finish states) 
+data ENFA = ENFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- epsilon-NFA, epsilon represented by -1
+data NFA = NFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- NFA, no epsilon allowed
 
 data Regex = Empty | Epsilon | Single Int | Plus Regex Regex | Times Regex Regex | Star Regex deriving (Show)
 
@@ -84,7 +85,11 @@ removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
     enfa = ENFA qs t q0 f
 
 next :: NFA -> [Int] -> Int -> [Int]
-next (NFA qs t q0 f) set a = filterTransitions (\r1 b -> a == b && r1 `elem` set) t
+next (NFA qs t q0 f) set a = removeDup qs $ concatMap (adjList' !) set
+    where 
+        -- these computations could be extracted to accepts to improve performance
+        adjList' = fmap (map snd . filter (\(b, _) -> a == b)) adjList
+        adjList = adjacencyList (ENFA qs t q0 f)
 
 accepts :: NFA -> [Int] -> Bool
 accepts (NFA qs t q0 f) w = (\set -> (not . null) (set `intersect` f)) $ foldl (next (NFA qs t q0 f)) [q0] w
