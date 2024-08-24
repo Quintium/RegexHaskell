@@ -1,5 +1,7 @@
 import Data.List
+import Data.Array
 import Data.Maybe
+import Control.Monad.State
 
 data ENFA = ENFA Int [(Int, Int, Int)] Int [Int] deriving (Show)
 data NFA = NFA Int [(Int, Int, Int)] Int [Int] deriving (Show)
@@ -45,32 +47,40 @@ regexENFA (Star r) = star (regexENFA r)
 filterTransitions :: (Int -> Int -> Bool) -> [(Int, Int, Int)] -> [Int]
 filterTransitions pred t = nub $ map (\(r1, a, r2) -> r2) $ filter (\(r1, a, r2) -> pred r1 a) t
 
-epsilonPaths :: ENFA -> Int -> [Int]
-epsilonPaths enfa r = epsilonFull enfa [r]
+adjacencyList :: ENFA -> Array Int [(Int, Int)]
+adjacencyList (ENFA qs t q0 f) = accumArray (flip (:)) [] (0, qs-1) [(r1, (a, r2)) | (r1, a, r2) <- t] 
 
-epsilonFull :: ENFA -> [Int] -> [Int]
-epsilonFull nfa rs
-    | rs' == rs = rs
-    | otherwise = epsilonFull nfa rs'
-  where
-    rs' = epsilonStep nfa rs
+epsilonAllPairs :: ENFA -> Array Int (Array Int Bool)
+epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonSinglePairs adjList r) | r <- [0..qs-1]]
+    where adjList = adjacencyList (ENFA qs t q0 f)
 
-epsilonStep :: ENFA -> [Int] -> [Int]
-epsilonStep (ENFA qs t q0 f) rs = nub $ concatMap (\r -> filterTransitions (\r1 a -> r1 == r && a == epsilon) t) rs ++ rs
+epsilonSinglePairs :: Array Int [(Int, Int)] -> Int -> Array Int Bool
+epsilonSinglePairs adjList q = execState (bfs adjList q) (listArray (0, qs-1) (replicate qs False))
+    where qs = rangeSize $ bounds adjList
 
-reachable :: ENFA -> Int -> Int -> [Int]
-reachable (ENFA qs t q0 f) r a = rs''
-  where
-    rs = epsilonPaths (ENFA qs t q0 f) r
-    rs' = filterTransitions (\r1 b -> a == b && r1 `elem` rs) t
-    rs'' = concatMap (epsilonPaths (ENFA qs t q0 f)) rs'
+bfs :: Array Int [(Int, Int)] -> Int -> State (Array Int Bool) ()
+bfs adjList q = do
+    reachable <- get
+    
+    unless (reachable ! q) 
+        (do
+            put $ reachable // [(q, True)]
+            mapM_ (\(a, r2) -> when (a == epsilon) $ bfs adjList r2) (adjList ! q)
+        )
+
+removeDup :: Int -> [Int] -> [Int]
+removeDup qs as = filter (arr !) [0..qs-1]
+    where arr = accumArray (||) False (0,qs-1) [(a, True) | a <- as]
 
 removeEpsilons :: ENFA -> NFA
 removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
   where
-    s = if null t then -1 else maximum $ map (\(r1, a, r2) -> a) t
-    t' = filter (\(r1, a, r2) -> r2 `elem` reachable enfa r1 a) [(r1, a, r2) | r1 <- [0 .. qs - 1], a <- [0 .. s], r2 <- [0 .. qs - 1]]
-    f' = filter (\r1 -> not $ null $ intersect (epsilonPaths enfa r1) f) [0 .. qs - 1]
+    t' = concatMap (\(r1, a, r2) -> [(r1', a, r2') | r1' <- backwardList ! r1, r2' <- forwardList ! r2]) t
+    f' = removeDup qs $ concatMap (backwardList !) f
+
+    forwardList = array (0,qs-1) [(q, filter (\r -> allPairs ! q ! r) [0..qs-1]) | q <- [0..qs-1]]
+    backwardList = array (0,qs-1) [(q, filter (\r -> allPairs ! r ! q) [0..qs-1]) | q <- [0..qs-1]]
+    allPairs = epsilonAllPairs enfa
     enfa = ENFA qs t q0 f
 
 next :: NFA -> [Int] -> Int -> [Int]
@@ -81,6 +91,12 @@ accepts (NFA qs t q0 f) w = (\set -> (not . null) (set `intersect` f)) $ foldl (
 
 epsAccepts :: ENFA -> [Int] -> Bool
 epsAccepts nfa = accepts (removeEpsilons nfa)
+
+fits :: String -> String -> Maybe Bool
+fits regS s = do
+    reg <- parseRegex regS
+    let enfa = regexENFA reg
+    return $ epsAccepts enfa (stringAscii s)
 
 searchNext :: NFA -> ([(Int, Int)], Int) -> Int -> ([(Int, Int)], Int)
 searchNext (NFA qs t q0 f) (set, n) a = (nubBy (\(r1, n1) (r2, n2) -> r1 == r2) mapped, n+1)
@@ -154,10 +170,3 @@ parseRegex s = case stack of
     Just [Ex reg] -> Just reg
     _ -> Nothing
     where stack = foldl (\ts c -> ts >>= parseRegexChar c) (Just []) ("(" ++ s ++ ")")
-
-fits :: String -> String -> Maybe Bool
-fits regS s = do
-    reg <- parseRegex regS
-    let enfa = regexENFA reg
-    return $ epsAccepts enfa (stringAscii s)
-
