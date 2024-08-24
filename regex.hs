@@ -126,47 +126,59 @@ search regS s = maybe (Left "Parse error") searchReg (parseRegex regS)
 ascii :: [Char]
 ascii = " !\"#$%&'()*+,−./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 
+specialChars :: [Char]
+specialChars = "()+*"
+
 charAscii :: Char -> Int
 charAscii c = fromJust $ elemIndex c ascii
 
 stringAscii :: String -> [Int]
 stringAscii = map charAscii
 
+data RegexChar = Special Char | Normal Char
+
+regexString :: String -> [RegexChar]
+regexString "" = []
+regexString "\\" = []
+regexString ('\\':c:s) = Normal c : regexString s
+regexString (c:s) | c `elem` specialChars = Special c : regexString s
+                  | otherwise = Normal c : regexString s
+
 data ParseToken = LBracket | PlusT | TimesT | Ex Regex deriving (Show)
-parseRegexChar :: Char -> [ParseToken] -> Maybe [ParseToken]
-parseRegexChar '(' [] = Just [LBracket]
-parseRegexChar '(' (LBracket : ts) = Just (LBracket : LBracket : ts)
-parseRegexChar '(' (PlusT : ts) = Just (LBracket : PlusT : ts)
-parseRegexChar '(' (TimesT : ts) = Just (LBracket : TimesT : ts)
-parseRegexChar '(' (Ex reg2 : PlusT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
-parseRegexChar '(' (Ex reg2 : TimesT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex (Times reg1 reg2) : ts)
-parseRegexChar '(' (Ex reg : ts) = Just (LBracket : TimesT : (Ex reg : ts))
+parseRegexChar :: RegexChar -> [ParseToken] -> Maybe [ParseToken]
+parseRegexChar (Special '(') [] = Just [LBracket]
+parseRegexChar (Special '(') (LBracket : ts) = Just (LBracket : LBracket : ts)
+parseRegexChar (Special '(') (PlusT : ts) = Just (LBracket : PlusT : ts)
+parseRegexChar (Special '(') (TimesT : ts) = Just (LBracket : TimesT : ts)
+parseRegexChar (Special '(') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
+parseRegexChar (Special '(')(Ex reg2 : TimesT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special '(') (Ex reg : ts) = Just (LBracket : TimesT : (Ex reg : ts))
 
-parseRegexChar '*' (Ex reg : ts) = Just (Ex (Star reg) : ts)
-parseRegexChar '*' _ = Nothing
+parseRegexChar (Special '*') (Ex reg : ts) = Just (Ex (Star reg) : ts)
+parseRegexChar (Special '*') _ = Nothing
 
-parseRegexChar '+' (Ex reg2 : PlusT : Ex reg1 : ts) = Just (PlusT : Ex (Plus reg1 reg2) : ts)
-parseRegexChar '+' (Ex reg2 : TimesT : Ex reg1 : ts) = Just (PlusT : Ex (Times reg1 reg2) : ts)
-parseRegexChar '+' (Ex reg : ts) = Just (PlusT : Ex reg : ts)
-parseRegexChar '+' _ = Nothing
+parseRegexChar (Special '+') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (PlusT : Ex (Plus reg1 reg2) : ts)
+parseRegexChar (Special '+') (Ex reg2 : TimesT : Ex reg1 : ts) = Just (PlusT : Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special '+') (Ex reg : ts) = Just (PlusT : Ex reg : ts)
+parseRegexChar (Special '+')_ = Nothing
 
-parseRegexChar ')' (LBracket : ts) = Just (Ex Epsilon : ts)
-parseRegexChar ')' (Ex reg : LBracket : ts) = Just (Ex reg : ts)
-parseRegexChar ')' (Ex reg3 : TimesT : Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 (Times reg2 reg3)) : ts)
-parseRegexChar ')' (Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 reg2) : ts)
-parseRegexChar ')' (Ex reg2 : TimesT : Ex reg1 : LBracket : ts) = Just (Ex (Times reg1 reg2) : ts)
-parseRegexChar ')' _ = Nothing
+parseRegexChar (Special ')') (LBracket : ts) = Just (Ex Epsilon : ts)
+parseRegexChar (Special ')') (Ex reg : LBracket : ts) = Just (Ex reg : ts)
+parseRegexChar (Special ')') (Ex reg3 : TimesT : Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 (Times reg2 reg3)) : ts)
+parseRegexChar (Special ')') (Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 reg2) : ts)
+parseRegexChar (Special ')') (Ex reg2 : TimesT : Ex reg1 : LBracket : ts) = Just (Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special ')') _ = Nothing
 
-parseRegexChar c [] = Just [Ex (Single (charAscii c))]
-parseRegexChar c (LBracket : ts) = Just (Ex (Single (charAscii c)) : LBracket : ts)
-parseRegexChar c (PlusT : ts) = Just (Ex (Single (charAscii c)) : PlusT : ts)
-parseRegexChar c (TimesT : ts) = Just (Ex (Single (charAscii c)) : TimesT : ts)
-parseRegexChar c (Ex reg2 : PlusT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
-parseRegexChar c (Ex reg2 : TimesT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex (Times reg1 reg2) : ts)
-parseRegexChar c (Ex reg : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg : ts)
+parseRegexChar (Normal c) [] = Just [Ex (Single (charAscii c))]
+parseRegexChar (Normal c) (LBracket : ts) = Just (Ex (Single (charAscii c)) : LBracket : ts)
+parseRegexChar (Normal c) (PlusT : ts) = Just (Ex (Single (charAscii c)) : PlusT : ts)
+parseRegexChar (Normal c) (TimesT : ts) = Just (Ex (Single (charAscii c)) : TimesT : ts)
+parseRegexChar (Normal c) (Ex reg2 : PlusT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
+parseRegexChar (Normal c) (Ex reg2 : TimesT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex (Times reg1 reg2) : ts)
+parseRegexChar (Normal c) (Ex reg : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg : ts)
 
 parseRegex :: String -> Maybe Regex
 parseRegex s = case stack of
     Just [Ex reg] -> Just reg
     _ -> Nothing
-    where stack = foldl (\ts c -> ts >>= parseRegexChar c) (Just []) ("(" ++ s ++ ")")
+    where stack = foldl (\ts c -> ts >>= parseRegexChar c) (Just []) (regexString $ "(" ++ s ++ ")")
