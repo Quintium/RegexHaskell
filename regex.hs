@@ -7,7 +7,10 @@ import Control.Monad.State
 data ENFA = ENFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- epsilon-NFA, epsilon represented by -1
 data NFA = NFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- NFA, no epsilon allowed
 
+-- Plus - union, Times - Concatenation, star - Kleene-star
 data Regex = Empty | Epsilon | Single Int | Plus Regex Regex | Times Regex Regex | Star Regex deriving (Show)
+
+-- epsNFAs for regex blocks
 
 epsilon :: Int
 epsilon = -1
@@ -21,21 +24,33 @@ singleEps = ENFA 1 [] 0 [0]
 single :: Int -> ENFA
 single a = ENFA 2 [(0, a, 1)] 0 [1]
 
+-- helper function to translate states of NFAs by given amount
 translateTransitions :: Int -> [(Int, Int, Int)] -> [(Int, Int, Int)]
 translateTransitions x = map (\(q1, a, q2) -> (q1 + x, a, q2 + x))
 
+-- combining epsNFAs
+
 plus :: ENFA -> ENFA -> ENFA
-plus (ENFA qs1 t1 q01 f1) (ENFA qs2 t2 q02 f2) = ENFA (qs1 + qs2 + 1) ([(q_start, epsilon, q01), (q_start, epsilon, q02 + qs1)] ++ t1 ++ translateTransitions qs1 t2) q_start (f1 ++ map (+ qs1) f2)
+plus (ENFA qs1 t1 q01 f1) (ENFA qs2 t2 q02 f2) = ENFA (qs1 + qs2 + 1) t' q0' f'
   where
-    q_start = qs1 + qs2
+    -- second states are translated as to not collide with first
+    t' = [(q0', epsilon, q01), (q0', epsilon, q02 + qs1)] ++ t1 ++ translateTransitions qs1 t2
+    f' = f1 ++ map (+ qs1) f2
+    q0' = qs1 + qs2
 
 times :: ENFA -> ENFA -> ENFA
-times (ENFA qs1 t1 q01 f1) (ENFA qs2 t2 q02 f2) = ENFA (qs1 + qs2) (t1 ++ translateTransitions qs1 t2 ++ map (,epsilon,q02 + qs1) f1) q01 (map (+ qs1) f2)
+times (ENFA qs1 t1 q01 f1) (ENFA qs2 t2 q02 f2) = ENFA (qs1 + qs2) t' q01 f'
   where
-    q_start = qs1 + qs2
+    -- second states are translated as to not collide with first
+    t' = t1 ++ translateTransitions qs1 t2 ++ map (,epsilon,q02 + qs1) f1
+    f' = map (+ qs1) f2
 
 star :: ENFA -> ENFA
-star (ENFA qs t q0 f) = ENFA (qs + 1) ([(qs, epsilon, q0)] ++ map (,epsilon,qs) f ++ t) qs [qs]
+star (ENFA qs t q0 f) = ENFA (qs + 1) t' q0' f'
+    where
+        t' = [(q0', epsilon, q0)] ++ map (, epsilon, q0') f ++ t
+        f' = [q0']
+        q0' = qs
 
 regexENFA :: Regex -> ENFA
 regexENFA Empty = empty
@@ -45,54 +60,64 @@ regexENFA (Plus r1 r2) = plus (regexENFA r1) (regexENFA r2)
 regexENFA (Times r1 r2) = times (regexENFA r1) (regexENFA r2)
 regexENFA (Star r) = star (regexENFA r)
 
-filterTransitions :: (Int -> Int -> Bool) -> [(Int, Int, Int)] -> [Int]
-filterTransitions pred t = nub $ map (\(r1, a, r2) -> r2) $ filter (\(r1, a, r2) -> pred r1 a) t
-
+-- create adjacency list for every state in the form of r1 -> [(a, r2), (a', r2')]; O(qs + |t|)
 adjacencyList :: ENFA -> Array Int [(Int, Int)]
 adjacencyList (ENFA qs t q0 f) = accumArray (flip (:)) [] (0, qs-1) [(r1, (a, r2)) | (r1, a, r2) <- t] 
 
+-- epsilonAllPairs nfa ! q1 ! q2 <=> path q1 -> q2 through epsilons exists
 epsilonAllPairs :: ENFA -> Array Int (Array Int Bool)
 epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonSinglePairs adjList r) | r <- [0..qs-1]]
     where adjList = adjacencyList (ENFA qs t q0 f)
 
+-- calculate which states can be reached through epsilons from given state
 epsilonSinglePairs :: Array Int [(Int, Int)] -> Int -> Array Int Bool
-epsilonSinglePairs adjList q = execState (bfs adjList q) (listArray (0, qs-1) (replicate qs False))
+epsilonSinglePairs adjList q = execState (dfs adjList q) (listArray (0, qs-1) (replicate qs False))
     where qs = rangeSize $ bounds adjList
 
-bfs :: Array Int [(Int, Int)] -> Int -> State (Array Int Bool) ()
-bfs adjList q = do
+-- perform depth-first-search on graph with given adjacency list starting from q
+-- state captures nodes visited already
+dfs :: Array Int [(Int, Int)] -> Int -> State (Array Int Bool) ()
+dfs adjList q = do
     reachable <- get
-    
     unless (reachable ! q) 
         (do
             put $ reachable // [(q, True)]
-            mapM_ (\(a, r2) -> when (a == epsilon) $ bfs adjList r2) (adjList ! q)
+            mapM_ (\(a, r2) -> when (a == epsilon) $ dfs adjList r2) (adjList ! q)
         )
 
-removeDup :: Int -> [Int] -> [Int]
-removeDup qs as = filter (arr !) [0..qs-1]
+-- removes duplicates/calculates intersection in a list of states with good performance
+
+removeDupQ :: Int -> [Int] -> [Int]
+removeDupQ qs as = filter (arr !) [0..qs-1]
     where arr = accumArray (||) False (0,qs-1) [(a, True) | a <- as]
 
+intersectQ :: Int -> [Int] -> [Int] -> [Int]
+intersectQ qs as bs = filter (\q -> arr ! q == 2) [0..qs-1]
+    where arr = accumArray (+) 0 (0,qs-1) [(a, 1) | a <- as ++ bs]
+
+-- convert epsNFA to NfA
 removeEpsilons :: ENFA -> NFA
 removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
   where
     t' = concatMap (\(r1, a, r2) -> [(r1', a, r2') | r1' <- backwardList ! r1, r2' <- forwardList ! r2]) $ filter (\(r1, a, r2) -> a /= epsilon) t
-    f' = removeDup qs $ concatMap (backwardList !) f
+    f' = removeDupQ qs $ concatMap (backwardList !) f
 
+    -- calculate, for every state, which states it can reach through epsilon (forwardList), or from which states it can be reached (backwardList)
     forwardList = array (0,qs-1) [(q, filter (\r -> allPairs ! q ! r) [0..qs-1]) | q <- [0..qs-1]]
     backwardList = array (0,qs-1) [(q, filter (\r -> allPairs ! r ! q) [0..qs-1]) | q <- [0..qs-1]]
     allPairs = epsilonAllPairs enfa
     enfa = ENFA qs t q0 f
 
+-- one nfa iteration, from the current states to the states after reading "a"
 next :: NFA -> [Int] -> Int -> [Int]
-next (NFA qs t q0 f) set a = removeDup qs $ concatMap (adjList' !) set
+next (NFA qs t q0 f) set a = removeDupQ qs $ concatMap (adjList' !) set
     where 
-        -- these computations could be extracted to accepts to improve performance
+        -- TODO: extract these computations to "accepts" to improve performance
         adjList' = fmap (map snd . filter (\(b, _) -> a == b)) adjList
         adjList = adjacencyList (ENFA qs t q0 f)
 
 accepts :: NFA -> [Int] -> Bool
-accepts (NFA qs t q0 f) w = (\set -> (not . null) (set `intersect` f)) $ foldl (next (NFA qs t q0 f)) [q0] w
+accepts (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next (NFA qs t q0 f)) [q0] w
 
 epsAccepts :: ENFA -> [Int] -> Bool
 epsAccepts nfa = accepts (removeEpsilons nfa)
@@ -144,8 +169,8 @@ data RegexChar = Special Char | Normal Char
 
 regexString :: String -> [RegexChar]
 regexString "" = []
-regexString "\\" = []
-regexString ('\\':c:s) = Normal c : regexString s
+regexString "!" = []
+regexString ('!':c:s) = Normal c : regexString s
 regexString (c:s) | c `elem` specialChars = Special c : regexString s
                   | otherwise = Normal c : regexString s
 
