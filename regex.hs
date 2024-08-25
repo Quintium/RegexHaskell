@@ -82,8 +82,17 @@ empty = ENFA 1 [] 0 []
 singleEps :: ENFA
 singleEps = ENFA 1 [] 0 [0]
 
+customSingle :: [Int] -> ENFA
+customSingle as = ENFA 2 (map (0,,1) as) 0 [1]
+
 single :: Int -> ENFA
-single a = ENFA 2 [(0, a, 1)] 0 [1]
+single a = customSingle [a]
+
+wildcard :: ENFA
+wildcard = customSingle [0..length ascii-1]
+
+wildcardStar :: ENFA
+wildcardStar = ENFA 1 (map (0,,0) [0..length ascii-1]) 0 [0]
 
 -- helper function to translate states of NFAs by given amount
 translateTransitions :: Int -> [(Int, Int, Int)] -> [(Int, Int, Int)]
@@ -237,10 +246,8 @@ match regS s = do
 exists :: String -> String -> Maybe Bool
 exists regS s = do
     reg <- parseRegex regS
-    let (ENFA qs t q0 f) = regexENFA reg
-    let q0' = qs -- new start state with self loop for every char
-    let t' = [(q0', epsilon, q0)] ++ [(q0', c, q0') | c <- [0..length ascii-1]] ++ t
-    return $ acceptsENFA (ENFA (qs+1) t' q0' f) (stringAscii s)
+    let enfa = regexENFA reg
+    return $ acceptsENFA (times (times wildcardStar enfa) wildcardStar) (stringAscii s)
 
 search :: String -> String -> Maybe [Match]
 search regS s = do
