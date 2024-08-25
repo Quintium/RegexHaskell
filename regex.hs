@@ -124,6 +124,12 @@ regexENFA (Star r) = star (regexENFA r)
 adjacencyList :: ENFA -> Array Int [(Int, Int)]
 adjacencyList (ENFA qs t q0 f) = accumArray (flip (:)) [] (0, qs-1) [(r1, (a, r2)) | (r1, a, r2) <- t] 
 
+-- alphAdjacencyList ! a ! q = all states that can be reached from q with a
+alphAdjacencyList :: ENFA -> Array Int (Array Int [Int])
+alphAdjacencyList (ENFA qs t q0 f) = array (0, length ascii-1) [(a, accumArray (flip (:)) [] (0, qs-1) (alphLists ! a)) | a <- [0..length ascii-1]]
+    where
+        alphLists = accumArray (flip (:)) [] (0, length ascii-1) [(a, (r1, r2)) | (r1, a, r2) <- t] 
+
 -- epsilonAllPairs nfa ! q1 ! q2 <=> path q1 -> q2 through epsilons exists
 epsilonAllPairs :: ENFA -> Array Int (Array Int Bool)
 epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonSinglePairs adjList r) | r <- [0..qs-1]]
@@ -175,11 +181,10 @@ next (NFA qs t q0 f) alphAdjList set a = removeDupQ qs $ concatMap (adj !) set
     where adj = alphAdjList ! a
 
 acceptsNFA :: NFA -> [Int] -> Bool
-acceptsNFA (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next (NFA qs t q0 f) alphAdjList) [q0] w
+acceptsNFA (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next nfa (alphAdjacencyList enfa)) [q0] w
     where 
-        -- alphAdjList ! a ! q = all states that can be reached from q with a
-        alphAdjList = array (0, length ascii-1) [(a, accumArray (flip (:)) [] (0, qs-1) (alphLists ! a)) | a <- [0..length ascii-1]]
-        alphLists = accumArray (flip (:)) [] (0, length ascii-1) [(a, (r1, r2)) | (r1, a, r2) <- t] 
+        nfa = NFA qs t q0 f
+        enfa = ENFA qs t q0 f
 
 acceptsENFA :: ENFA -> [Int] -> Bool
 acceptsENFA enfa = acceptsNFA (removeEpsilons enfa)
