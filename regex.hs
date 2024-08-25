@@ -49,7 +49,7 @@ parseRegexChar (Special '+') (Ex reg2 : TimesT : Ex reg1 : ts)                  
 parseRegexChar (Special '+') (Ex reg : ts)                                       = Just (PlusT : Ex reg : ts)
 parseRegexChar (Special '+') _                                                   = Nothing
 
-parseRegexChar (Special ')') (LBracket : ts)                                                = Just (Ex Epsilon : ts)
+parseRegexChar (Special ')') (LBracket : ts)                                                = Just (Ex Epsilon : ts) -- "()" represents epsilon
 parseRegexChar (Special ')') (Ex reg : LBracket : ts)                                       = Just (Ex reg : ts)
 parseRegexChar (Special ')') (Ex reg3 : TimesT : Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 (Times reg2 reg3)) : ts)
 parseRegexChar (Special ')') (Ex reg2 : PlusT : Ex reg1 : LBracket : ts)                    = Just (Ex (Plus reg1 reg2) : ts)
