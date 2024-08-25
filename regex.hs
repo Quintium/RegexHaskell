@@ -2,6 +2,7 @@ import Data.List
 import Data.Array
 import Data.Maybe
 import Control.Monad.State
+import Debug.Trace
 
 -- Plus - union, Times - Concatenation, star - Kleene-star
 data Regex = Empty | Epsilon | Single Int | Plus Regex Regex | Times Regex Regex | Star Regex deriving (Show)
@@ -161,6 +162,11 @@ intersectQ :: Int -> [Int] -> [Int] -> [Int]
 intersectQ qs as bs = filter (\q -> arr ! q == 2) [0..qs-1]
     where arr = accumArray (+) 0 (0,qs-1) [(a, 1) | a <- as ++ bs]
 
+insertUnique :: Eq a => a -> [a] -> [a]
+insertUnique a [] = [a]
+insertUnique a (x:xs) | a == x    = x : xs
+                      | otherwise = a : x : xs
+
 -- convert epsNFA to NfA
 removeEpsilons :: ENFA -> NFA
 removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
@@ -189,6 +195,37 @@ acceptsNFA (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ fo
 acceptsENFA :: ENFA -> [Int] -> Bool
 acceptsENFA enfa = acceptsNFA (removeEpsilons enfa)
 
+-- minimal match data without word
+newtype MatchM = MatchM (Int, Int) deriving Show
+
+data Match = Match String MatchM
+instance Show Match where
+    show :: Match -> String
+    show (Match s (MatchM (a, b))) = show a ++ "-" ++ show b ++ ": \"" ++ drop a (take b s) ++ "\""
+
+-- one nfa iteration, from the current states to the states after reading "a"
+searchNext :: NFA -> Array Int (Array Int [Int]) -> Array Int [Int] -> Int -> [Int] -> [MatchM]
+searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
+    where 
+        finished = map ((,n) . head) $ group $ sort $ concatMap (addedSet !) f
+        addedSet = set // [(q0, n : (set ! q0))]
+searchNext (NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ searchNext nfa alphAdjList newSet (n+1) as
+    where 
+        newSet = accumArray (flip insertUnique) [] (0,qs-1) $ concat [[(r, k) | k <- addedSet ! q, r <- adj ! q] | q <- [0..qs-1]]
+        finished = map ((,n) . head) $ group $ sort $ concatMap (addedSet !) f
+        addedSet = set // [(q0, n : (set ! q0))]
+        adj = alphAdjList ! a
+        nfa = NFA qs t q0 f
+
+searchNFA :: NFA -> [Int] -> [MatchM]
+searchNFA (NFA qs t q0 f) = searchNext nfa (alphAdjacencyList enfa) (listArray (0,qs-1) $ replicate qs []) 0 
+    where 
+        nfa = NFA qs t q0 f
+        enfa = ENFA qs t q0 f
+
+searchENFA :: ENFA -> [Int] -> [MatchM]
+searchENFA enfa = searchNFA (removeEpsilons enfa)
+
 -- check if regex matches whole string
 match :: String -> String -> Maybe Bool
 match regS s = do
@@ -204,3 +241,9 @@ exists regS s = do
     let q0' = qs -- new start state with self loop for every char
     let t' = [(q0', epsilon, q0)] ++ [(q0', c, q0') | c <- [0..length ascii-1]] ++ t
     return $ acceptsENFA (ENFA (qs+1) t' q0' f) (stringAscii s)
+
+search :: String -> String -> Maybe [Match]
+search regS s = do
+    reg <- parseRegex regS
+    let enfa = regexENFA reg
+    return $ map (Match s) $ searchENFA enfa (stringAscii s)
