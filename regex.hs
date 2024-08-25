@@ -21,6 +21,7 @@ stringAscii = map charAscii
 
 data RegexChar = Special Char | Normal Char
 
+-- escaping possible with '!'
 regexString :: String -> [RegexChar]
 regexString "" = []
 regexString "!" = []
@@ -28,38 +29,39 @@ regexString ('!':c:s) = Normal c : regexString s
 regexString (c:s) | c `elem` specialChars = Special c : regexString s
                   | otherwise = Normal c : regexString s
 
+-- shift-reduce algorithm for parsing regular expressions, for example (b(ab)*+a)*bb
 data ParseToken = LBracket | PlusT | TimesT | Ex Regex deriving (Show)
 parseRegexChar :: RegexChar -> [ParseToken] -> Maybe [ParseToken]
-parseRegexChar (Special '(') [] = Just [LBracket]
-parseRegexChar (Special '(') (LBracket : ts) = Just (LBracket : LBracket : ts)
-parseRegexChar (Special '(') (PlusT : ts) = Just (LBracket : PlusT : ts)
-parseRegexChar (Special '(') (TimesT : ts) = Just (LBracket : TimesT : ts)
-parseRegexChar (Special '(') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
+parseRegexChar (Special '(') []                                = Just [LBracket]
+parseRegexChar (Special '(') (LBracket : ts)                   = Just (LBracket : LBracket : ts)
+parseRegexChar (Special '(') (PlusT : ts)                      = Just (LBracket : PlusT : ts)
+parseRegexChar (Special '(') (TimesT : ts)                     = Just (LBracket : TimesT : ts)
+parseRegexChar (Special '(') (Ex reg2 : PlusT : Ex reg1 : ts)  = Just (LBracket : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
 parseRegexChar (Special '(') (Ex reg2 : TimesT : Ex reg1 : ts) = Just (LBracket : TimesT : Ex (Times reg1 reg2) : ts)
-parseRegexChar (Special '(') (Ex reg : ts) = Just (LBracket : TimesT : (Ex reg : ts))
+parseRegexChar (Special '(') (Ex reg : ts)                     = Just (LBracket : TimesT : (Ex reg : ts))
 
-parseRegexChar (Special '*') (Ex reg : ts) = Just (Ex (Star reg) : ts)
-parseRegexChar (Special '*') _ = Nothing
+parseRegexChar (Special '*') (Ex reg : ts) = Just (Ex (Star reg) : ts) -- highest precedence
+parseRegexChar (Special '*') _             = Nothing
 
-parseRegexChar (Special '+') (Ex reg2 : PlusT : Ex reg1 : ts) = Just (PlusT : Ex (Plus reg1 reg2) : ts)
-parseRegexChar (Special '+') (Ex reg2 : TimesT : Ex reg1 : ts) = Just (PlusT : Ex (Times reg1 reg2) : ts)
-parseRegexChar (Special '+') (Ex reg : ts) = Just (PlusT : Ex reg : ts)
-parseRegexChar (Special '+')_ = Nothing
+parseRegexChar (Special '+') (Ex reg3 : TimesT : Ex reg2 : PlusT : Ex reg1 : ts) = Just (PlusT : Ex (Plus reg1 (Times reg2 reg3)) : ts)
+parseRegexChar (Special '+') (Ex reg2 : PlusT : Ex reg1 : ts)                    = Just (PlusT : Ex (Plus reg1 reg2) : ts)
+parseRegexChar (Special '+') (Ex reg2 : TimesT : Ex reg1 : ts)                   = Just (PlusT : Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special '+') (Ex reg : ts)                                       = Just (PlusT : Ex reg : ts)
+parseRegexChar (Special '+') _                                                   = Nothing
 
-parseRegexChar (Special ')') (LBracket : ts) = Just (Ex Epsilon : ts)
-parseRegexChar (Special ')') (Ex reg : LBracket : ts) = Just (Ex reg : ts)
+parseRegexChar (Special ')') (LBracket : ts)                                                = Just (Ex Epsilon : ts)
+parseRegexChar (Special ')') (Ex reg : LBracket : ts)                                       = Just (Ex reg : ts)
 parseRegexChar (Special ')') (Ex reg3 : TimesT : Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 (Times reg2 reg3)) : ts)
-parseRegexChar (Special ')') (Ex reg2 : PlusT : Ex reg1 : LBracket : ts) = Just (Ex (Plus reg1 reg2) : ts)
-parseRegexChar (Special ')') (Ex reg2 : TimesT : Ex reg1 : LBracket : ts) = Just (Ex (Times reg1 reg2) : ts)
-parseRegexChar (Special ')') _ = Nothing
+parseRegexChar (Special ')') (Ex reg2 : PlusT : Ex reg1 : LBracket : ts)                    = Just (Ex (Plus reg1 reg2) : ts)
+parseRegexChar (Special ')') (Ex reg2 : TimesT : Ex reg1 : LBracket : ts)                   = Just (Ex (Times reg1 reg2) : ts)
+parseRegexChar (Special ')') _                                                              = Nothing
 
-parseRegexChar (Normal c) [] = Just [Ex (Single (charAscii c))]
-parseRegexChar (Normal c) (LBracket : ts) = Just (Ex (Single (charAscii c)) : LBracket : ts)
-parseRegexChar (Normal c) (PlusT : ts) = Just (Ex (Single (charAscii c)) : PlusT : ts)
-parseRegexChar (Normal c) (TimesT : ts) = Just (Ex (Single (charAscii c)) : TimesT : ts)
-parseRegexChar (Normal c) (Ex reg2 : PlusT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg2 : PlusT : Ex reg1 : ts)
+parseRegexChar (Normal c) []                                = Just [Ex (Single (charAscii c))]
+parseRegexChar (Normal c) (LBracket : ts)                   = Just (Ex (Single (charAscii c)) : LBracket : ts)
+parseRegexChar (Normal c) (PlusT : ts)                      = Just (Ex (Single (charAscii c)) : PlusT : ts)
+parseRegexChar (Normal c) (TimesT : ts)                     = Just (Ex (Single (charAscii c)) : TimesT : ts)
 parseRegexChar (Normal c) (Ex reg2 : TimesT : Ex reg1 : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex (Times reg1 reg2) : ts)
-parseRegexChar (Normal c) (Ex reg : ts) = Just (Ex (Single (charAscii c)) : TimesT : Ex reg : ts)
+parseRegexChar (Normal c) (Ex reg : ts)                     = Just (Ex (Single (charAscii c)) : TimesT : Ex reg : ts)
 
 parseRegex :: String -> Maybe Regex
 parseRegex s = case stack of
@@ -207,10 +209,12 @@ acceptsENFA enfa = acceptsNFA (removeEpsilons enfa)
 -- minimal match data without word
 newtype MatchM = MatchM (Int, Int) deriving (Show, Eq)
 
+-- earliest and largest match first
 instance Ord MatchM where
     (<=) :: MatchM -> MatchM -> Bool
     (MatchM (l1,r1)) <= (MatchM (l2,r2)) = l1 < l2 || (l1 == l2 && r1 >= r2)
 
+-- match with word that can be printed out
 data Match = Match String MatchM
 
 matchStr :: Match -> String
@@ -220,7 +224,7 @@ instance Show Match where
     show :: Match -> String
     show (Match s (MatchM (a, b))) = show a ++ "-" ++ show b ++ ": \"" ++ drop a (take b s) ++ "\""
 
--- one nfa iteration, from the current states to the states after reading "a"
+-- one search iteration, set[q] = [0,3] if there are runs from char 0 and 3 that ended up in q, n is the current character
 searchNext :: NFA -> Array Int (Array Int [Int]) -> Array Int [Int] -> Int -> [Int] -> [MatchM]
 searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
     where 
@@ -228,9 +232,10 @@ searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
         addedSet = set // [(q0, n : (set ! q0))]
 searchNext (NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ searchNext nfa alphAdjList newSet (n+1) as
     where 
+        -- transform states through transitions
         newSet = accumArray (flip insertUnique) [] (0,qs-1) $ concat [[(r, k) | k <- addedSet ! q, r <- adj ! q] | q <- [0..qs-1]]
         finished = map ((,n) . head) $ group $ sort $ concatMap (addedSet !) f
-        addedSet = set // [(q0, n : (set ! q0))]
+        addedSet = set // [(q0, n : (set ! q0))] -- for every char a new run starting at q0 is created
         adj = alphAdjList ! a
         nfa = NFA qs t q0 f
 
@@ -257,12 +262,14 @@ exists regS s = do
     let enfa = regexENFA reg
     return $ acceptsENFA (times (times wildcardStar enfa) wildcardStar) (stringAscii s)
 
+-- search for all occurrences of a regex
 search :: String -> String -> Maybe [Match]
 search regS s = do
     reg <- parseRegex regS
     let enfa = regexENFA reg
     return $ map (Match s) $ searchENFA enfa (stringAscii s)
 
+-- split string at all occurrences of a regex
 split :: String -> String -> Maybe [String]
 split regS s = do
     reg <- parseRegex regS
