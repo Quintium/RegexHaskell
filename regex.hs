@@ -205,9 +205,17 @@ acceptsENFA :: ENFA -> [Int] -> Bool
 acceptsENFA enfa = acceptsNFA (removeEpsilons enfa)
 
 -- minimal match data without word
-newtype MatchM = MatchM (Int, Int) deriving Show
+newtype MatchM = MatchM (Int, Int) deriving (Show, Eq)
+
+instance Ord MatchM where
+    (<=) :: MatchM -> MatchM -> Bool
+    (MatchM (l1,r1)) <= (MatchM (l2,r2)) = l1 < l2 || (l1 == l2 && r1 >= r2)
 
 data Match = Match String MatchM
+
+matchStr :: Match -> String
+matchStr (Match s (MatchM (a, b))) = drop a (take b s)
+
 instance Show Match where
     show :: Match -> String
     show (Match s (MatchM (a, b))) = show a ++ "-" ++ show b ++ ": \"" ++ drop a (take b s) ++ "\""
@@ -254,3 +262,13 @@ search regS s = do
     reg <- parseRegex regS
     let enfa = regexENFA reg
     return $ map (Match s) $ searchENFA enfa (stringAscii s)
+
+split :: String -> String -> Maybe [String]
+split regS s = do
+    reg <- parseRegex regS
+    let enfa = regexENFA reg
+    let matches = searchENFA enfa (stringAscii s)
+    let sortedMatches = sort matches
+    let (last, words') = foldl (\(k, ms) (MatchM (l,r)) -> if k <= l then (r, MatchM (k,l) : ms) else (k, ms)) (0, []) sortedMatches
+    let words = reverse $ MatchM (last, length s) : words'
+    return $ map (matchStr . Match s) words
