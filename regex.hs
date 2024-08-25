@@ -184,8 +184,18 @@ acceptsNFA (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ fo
 acceptsENFA :: ENFA -> [Int] -> Bool
 acceptsENFA enfa = acceptsNFA (removeEpsilons enfa)
 
+-- check if regex matches whole string
 match :: String -> String -> Maybe Bool
 match regS s = do
     reg <- parseRegex regS
     let enfa = regexENFA reg
     return $ acceptsENFA enfa (stringAscii s)
+
+-- check if string contains substrings that matches regex
+exists :: String -> String -> Maybe Bool
+exists regS s = do
+    reg <- parseRegex regS
+    let (ENFA qs t q0 f) = regexENFA reg
+    let q0' = qs -- new start state with self loop for every char
+    let t' = [(q0', epsilon, q0)] ++ [(q0', c, q0') | c <- [0..length ascii-1]] ++ t
+    return $ acceptsENFA (ENFA (qs+1) t' q0' f) (stringAscii s)
