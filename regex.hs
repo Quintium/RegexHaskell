@@ -224,7 +224,7 @@ instance Show Match where
     show :: Match -> String
     show (Match s (MatchM (a, b))) = show a ++ "-" ++ show b ++ ": \"" ++ drop a (take b s) ++ "\""
 
--- one search iteration, set[q] = [0,3] if there are runs from char 0 and 3 that ended up in q, n is the current character
+-- one search iteration, set[q] = [0,3] if there are runs from char 0 and 3 that ended up in q, n is the current character index
 searchNext :: NFA -> Array Int (Array Int [Int]) -> Array Int [Int] -> Int -> [Int] -> [MatchM]
 searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
     where 
