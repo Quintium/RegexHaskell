@@ -239,7 +239,8 @@ mergeListsArr arr | len == 0 || all null arr = []
 mergeLists :: [[Int]] -> [Int]
 mergeLists ls = map head $ group $ mergeListsArr $ listArray (0,length ls-1) ls
 
--- one search iteration, set[q] = [0,3] if there are runs from char 0 and 3 that ended up in q, n is the current character index
+-- one search iteration, set[q] = [3,0] if there are runs from char 0 and 3 that ended up in q, n is the current character index
+-- the set elements are sorted decreasingly, allowing for good asymptotic performance merging the lists
 searchNext :: NFA -> Array Int (Array Int [Int]) -> Array Int [Int] -> Int -> [Int] -> [MatchM]
 searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
     where 
