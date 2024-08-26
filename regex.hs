@@ -178,7 +178,7 @@ insertUnique a [] = [a]
 insertUnique a (x:xs) | a == x    = x : xs
                       | otherwise = a : x : xs
 
--- convert epsNFA to NfA
+-- convert epsNFA to NFA
 removeEpsilons :: ENFA -> NFA
 removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
   where
@@ -224,17 +224,32 @@ instance Show Match where
     show :: Match -> String
     show (Match s (MatchM (a, b))) = show a ++ "-" ++ show b ++ ": \"" ++ drop a (take b s) ++ "\""
 
+safeHead :: [a] -> [a]
+safeHead [] = []
+safeHead (x:xs) = [x]
+
+-- merge decreasingly sorted lists into one
+mergeListsArr :: Array Int [Int] -> [Int]
+mergeListsArr arr | len == 0 || all null arr = []
+                  | otherwise = max : mergeListsArr (arr // [(ind, tail $ arr ! ind)])
+    where len = rangeSize $ bounds arr
+          (ind, max) = maximumBy (\(_, a) (_, b) -> compare a b) $ concatMap (\i -> map (i, ) $ safeHead $ arr ! i) [0..len-1]
+
+-- merge lists as in mergeListsArr, also remove duplicates
+mergeLists :: [[Int]] -> [Int]
+mergeLists ls = map head $ group $ mergeListsArr $ listArray (0,length ls-1) ls
+
 -- one search iteration, set[q] = [0,3] if there are runs from char 0 and 3 that ended up in q, n is the current character index
 searchNext :: NFA -> Array Int (Array Int [Int]) -> Array Int [Int] -> Int -> [Int] -> [MatchM]
 searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
     where 
-        finished = map ((,n) . head) $ group $ sort $ concatMap (addedSet !) f
+        finished = map (,n) $ mergeLists $ map (addedSet !) f
         addedSet = set // [(q0, n : (set ! q0))]
 searchNext (NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ searchNext nfa alphAdjList newSet (n+1) as
     where 
         -- transform states through transitions
-        newSet = accumArray (flip insertUnique) [] (0,qs-1) $ concat [[(r, k) | k <- addedSet ! q, r <- adj ! q] | q <- [0..qs-1]]
-        finished = map ((,n) . head) $ group $ sort $ concatMap (addedSet !) f
+        newSet = fmap mergeLists $ accumArray (flip (:)) [] (0,qs-1) $ [(r, addedSet ! q) | q <- [0..qs-1], r <- adj ! q]
+        finished = map (,n) $ mergeLists $ map (addedSet !) f
         addedSet = set // [(q0, n : (set ! q0))] -- for every char a new run starting at q0 is created
         adj = alphAdjList ! a
         nfa = NFA qs t q0 f
