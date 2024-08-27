@@ -235,9 +235,16 @@ mergeListsArr arr | len == 0 || all null arr = []
     where len = rangeSize $ bounds arr
           (ind, max) = maximumBy (\(_, a) (_, b) -> compare a b) $ concatMap (\i -> map (i, ) $ safeHead $ arr ! i) [0..len-1]
 
--- merge lists as in mergeListsArr, also remove duplicates
+-- merge two decreasingly sorted lists
+mergeTwo :: [Int] -> [Int] -> [Int]
+mergeTwo [] ys = ys
+mergeTwo xs [] = xs
+mergeTwo (x:xs) (y:ys) | x > y     = x : mergeTwo xs (y:ys)
+                       | otherwise = y : mergeTwo (x:xs) ys
+
+-- merge lists as in mergeTwo, also remove duplicates
 mergeLists :: [[Int]] -> [Int]
-mergeLists ls = map head $ group $ mergeListsArr $ listArray (0,length ls-1) ls
+mergeLists ls = map head $ group $ foldl mergeTwo [] ls
 
 -- one search iteration, set[q] = [3,0] if there are runs from char 0 and 3 that ended up in q, n is the current character index
 -- the set elements are sorted decreasingly, allowing for good asymptotic performance merging the lists
