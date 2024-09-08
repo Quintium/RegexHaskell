@@ -228,13 +228,6 @@ safeHead :: [a] -> [a]
 safeHead [] = []
 safeHead (x:xs) = [x]
 
--- merge decreasingly sorted lists into one
-mergeListsArr :: Array Int [Int] -> [Int]
-mergeListsArr arr | len == 0 || all null arr = []
-                  | otherwise = max : mergeListsArr (arr // [(ind, tail $ arr ! ind)])
-    where len = rangeSize $ bounds arr
-          (ind, max) = maximumBy (\(_, a) (_, b) -> compare a b) $ concatMap (\i -> map (i, ) $ safeHead $ arr ! i) [0..len-1]
-
 -- merge two decreasingly sorted lists
 mergeTwo :: [Int] -> [Int] -> [Int]
 mergeTwo [] ys = ys
