@@ -1,8 +1,12 @@
 import Data.List
 import Data.Array
+import Data.Array.ST
 import Data.Maybe
+import Data.STRef
 import Control.Monad.State
+import Control.Monad.ST
 import Debug.Trace
+import Control.DeepSeq
 
 -- Plus - union, Times - Concatenation, star - Kleene-star
 data Regex = Empty | Epsilon | Single Int | Plus Regex Regex | Times Regex Regex | Star Regex deriving (Show)
@@ -144,24 +148,32 @@ alphAdjacencyList (ENFA qs t q0 f) = array (0, length ascii-1) [(a, accumArray (
 
 -- epsilonAllPairs nfa ! q1 ! q2 <=> path q1 -> q2 through epsilons exists
 epsilonAllPairs :: ENFA -> Array Int (Array Int Bool)
-epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonSinglePairs adjList r) | r <- [0..qs-1]]
-    where adjList = adjacencyList (ENFA qs t q0 f)
+epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonSinglePairs adjListEps r qs) | r <- [0..qs-1]]
+    where adjListEps = mapMaybe (\(a, r2) -> if a == epsilon then Just r2 else Nothing) <$> adjacencyList (ENFA qs t q0 f) -- adjacency list for epsilon transitions only
 
 -- calculate which states can be reached through epsilons from given state
-epsilonSinglePairs :: Array Int [(Int, Int)] -> Int -> Array Int Bool
-epsilonSinglePairs adjList q = execState (dfs adjList q) (listArray (0, qs-1) (replicate qs False))
-    where qs = rangeSize $ bounds adjList
+epsilonSinglePairs :: Array Int [Int] -> Int -> Int -> Array Int Bool
+epsilonSinglePairs adjListEps q qs = runSTArray $ do
+    startArr <- newArray (0, qs-1) False
+    acc <- newSTRef startArr
+    dfs adjListEps q acc
 
--- perform depth-first-search on graph with given adjacency list starting from q
--- state captures nodes visited already
-dfs :: Array Int [(Int, Int)] -> Int -> State (Array Int Bool) ()
-dfs adjList q = do
-    reachable <- get
-    unless (reachable ! q) 
+-- perform depth-first-search on graph with given epsilon adjacency list starting from q
+-- mutable array captures nodes visited already
+-- mutable arrays are probably overkill, since extremely large regexes are probably rarely used in practice
+dfs :: Array Int [Int] -> Int -> STRef s (STArray s Int Bool) -> ST s (STArray s Int Bool)
+dfs adjListEps q acc = do
+    reachable <- readSTRef acc
+    reached <- readArray reachable q
+    if not reached 
+    then
         (do
-            put $ reachable // [(q, True)]
-            mapM_ (\(a, r2) -> when (a == epsilon) $ dfs adjList r2) (adjList ! q)
+            writeArray reachable q True
+            mapM_ (\q' -> dfs adjListEps q' acc) (adjListEps ! q)
+            return reachable
         )
+    else
+        return reachable
 
 -- removes duplicates/calculates intersection in a list of states with good asymptotic performance
 
@@ -244,13 +256,13 @@ mergeLists ls = map head $ group $ foldl mergeTwo [] ls
 searchNext :: NFA -> Array Int (Array Int [Int]) -> Array Int [Int] -> Int -> [Int] -> [MatchM]
 searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
     where 
-        finished = map (,n) $ mergeLists $ map addedSet f
+        finished = map (,n) $ reverse $ mergeLists $ map addedSet f
         addedSet i = if i == q0 then n : (set ! i) else set ! i
 searchNext (NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ searchNext nfa alphAdjList newSet (n+1) as
     where 
         -- transform states through transitions
         newSet = fmap mergeLists $ accumArray (flip (:)) [] (0,qs-1) $ [(r, addedSet q) | q <- [0..qs-1], r <- adj ! q]
-        finished = map (,n) $ mergeLists $ map addedSet f
+        finished = map (,n) $ reverse $ mergeLists $ map addedSet f
         addedSet i = if i == q0 then n : (set ! i) else set ! i -- for every char a new run starting at q0 is created
         adj = alphAdjList ! a
         nfa = NFA qs t q0 f
