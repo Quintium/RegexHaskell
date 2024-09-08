@@ -151,29 +151,20 @@ epsilonAllPairs :: ENFA -> Array Int (Array Int Bool)
 epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonReachable adjListEps r qs) | r <- [0..qs-1]]
     where adjListEps = mapMaybe (\(a, r2) -> if a == epsilon then Just r2 else Nothing) <$> adjacencyList (ENFA qs t q0 f) -- adjacency list for epsilon transitions only
 
--- calculate which states can be reached through epsilons from given state
+-- Calculate which states can be reached through epsilons from a given state
 epsilonReachable :: Array Int [Int] -> Int -> Int -> Array Int Bool
 epsilonReachable adjListEps q qs = runSTArray $ do
-    startArr <- newArray (0, qs-1) False
-    acc <- newSTRef startArr
-    dfs adjListEps q acc
+    reachable <- newArray (0, qs-1) False
+    dfs adjListEps q reachable
+    return reachable
 
--- perform depth-first-search on graph with given epsilon adjacency list starting from q
--- mutable array captures nodes visited already
--- mutable arrays are probably overkill, since extremely large regexes are probably rarely used in practice
-dfs :: Array Int [Int] -> Int -> STRef s (STArray s Int Bool) -> ST s (STArray s Int Bool)
-dfs adjListEps q acc = do
-    reachable <- readSTRef acc
+-- Perform depth-first-search on graph with epsilon adjacency list starting from q
+dfs :: Array Int [Int] -> Int -> STArray s Int Bool -> ST s ()
+dfs adjListEps q reachable = do
     reached <- readArray reachable q
-    if not reached 
-    then
-        (do
-            writeArray reachable q True
-            mapM_ (\q' -> dfs adjListEps q' acc) (adjListEps ! q)
-            return reachable
-        )
-    else
-        return reachable
+    unless reached $ do
+        writeArray reachable q True
+        forM_ (adjListEps ! q) $ \q' -> dfs adjListEps q' reachable
 
 -- removes duplicates/calculates intersection in a list of states with good asymptotic performance
 
