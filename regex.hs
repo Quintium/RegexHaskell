@@ -255,6 +255,9 @@ searchNext (NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ sea
         adj = alphAdjList ! a
         nfa = NFA qs t q0 f
 
+-- unfortunately O(n^2), i'm not sure if better asymptotics are possible, since runs starting at each character have to be tracked
+-- this means that using this engine to search for regexes in a file containing >1000 characters could cause the program to be freeze
+-- a fix could be to only track the longest match, however i'm not sure how that would be done (TODO?)
 searchNFA :: NFA -> [Int] -> [MatchM]
 searchNFA (NFA qs t q0 f) = searchNext nfa (alphAdjacencyList enfa) (listArray (0,qs-1) $ replicate qs []) 0 
     where 
