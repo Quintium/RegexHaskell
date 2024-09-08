@@ -148,12 +148,12 @@ alphAdjacencyList (ENFA qs t q0 f) = array (0, length ascii-1) [(a, accumArray (
 
 -- epsilonAllPairs nfa ! q1 ! q2 <=> path q1 -> q2 through epsilons exists
 epsilonAllPairs :: ENFA -> Array Int (Array Int Bool)
-epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonSinglePairs adjListEps r qs) | r <- [0..qs-1]]
+epsilonAllPairs (ENFA qs t q0 f) = array (0, qs-1) [(r, epsilonReachable adjListEps r qs) | r <- [0..qs-1]]
     where adjListEps = mapMaybe (\(a, r2) -> if a == epsilon then Just r2 else Nothing) <$> adjacencyList (ENFA qs t q0 f) -- adjacency list for epsilon transitions only
 
 -- calculate which states can be reached through epsilons from given state
-epsilonSinglePairs :: Array Int [Int] -> Int -> Int -> Array Int Bool
-epsilonSinglePairs adjListEps q qs = runSTArray $ do
+epsilonReachable :: Array Int [Int] -> Int -> Int -> Array Int Bool
+epsilonReachable adjListEps q qs = runSTArray $ do
     startArr <- newArray (0, qs-1) False
     acc <- newSTRef startArr
     dfs adjListEps q acc
