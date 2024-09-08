@@ -244,14 +244,14 @@ mergeLists ls = map head $ group $ foldl mergeTwo [] ls
 searchNext :: NFA -> Array Int (Array Int [Int]) -> Array Int [Int] -> Int -> [Int] -> [MatchM]
 searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
     where 
-        finished = map (,n) $ mergeLists $ map (addedSet !) f
-        addedSet = set // [(q0, n : (set ! q0))]
+        finished = map (,n) $ mergeLists $ map addedSet f
+        addedSet i = if i == q0 then n : (set ! i) else set ! i
 searchNext (NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ searchNext nfa alphAdjList newSet (n+1) as
     where 
         -- transform states through transitions
-        newSet = fmap mergeLists $ accumArray (flip (:)) [] (0,qs-1) $ [(r, addedSet ! q) | q <- [0..qs-1], r <- adj ! q]
-        finished = map (,n) $ mergeLists $ map (addedSet !) f
-        addedSet = set // [(q0, n : (set ! q0))] -- for every char a new run starting at q0 is created
+        newSet = fmap mergeLists $ accumArray (flip (:)) [] (0,qs-1) $ [(r, addedSet q) | q <- [0..qs-1], r <- adj ! q]
+        finished = map (,n) $ mergeLists $ map addedSet f
+        addedSet i = if i == q0 then n : (set ! i) else set ! i -- for every char a new run starting at q0 is created
         adj = alphAdjList ! a
         nfa = NFA qs t q0 f
 
