@@ -2,7 +2,7 @@ import Data.List
 import Data.Array
 import Data.Array.ST
 import Data.Maybe
-import Data.STRef
+import Data.Coerce
 import Control.Monad.State
 import Control.Monad.ST
 import Debug.Trace
@@ -76,6 +76,9 @@ parseRegex s = case stack of
 -- epsilon-NFA, ENFA (qs - number of states) (t - transitions in the form of (q1, a, q2)) (q0 - start state) (f - finish states) 
 data ENFA = ENFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- epsilon-NFA, epsilon represented by -1
 data NFA = NFA Int [(Int, Int, Int)] Int [Int] deriving (Show) -- NFA, no epsilon allowed
+
+toENFA :: NFA -> ENFA
+toENFA (NFA qs t q0 f) = ENFA qs t q0 f
 
 -- epsNFAs for regex blocks
 
@@ -183,7 +186,7 @@ insertUnique a (x:xs) | a == x    = x : xs
 
 -- convert epsNFA to NFA
 removeEpsilons :: ENFA -> NFA
-removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
+removeEpsilons enfa@(ENFA qs t q0 f) = NFA qs t' q0 f'
   where
     t' = concatMap (\(r1, a, r2) -> [(r1', a, r2') | r1' <- backwardList ! r1, r2' <- forwardList ! r2]) $ filter (\(r1, a, r2) -> a /= epsilon) t
     f' = removeDupQ qs $ concatMap (backwardList !) f
@@ -192,7 +195,6 @@ removeEpsilons (ENFA qs t q0 f) = NFA qs t' q0 f'
     forwardList = array (0,qs-1) [(q, filter (\r -> allPairs ! q ! r) [0..qs-1]) | q <- [0..qs-1]]
     backwardList = array (0,qs-1) [(q, filter (\r -> allPairs ! r ! q) [0..qs-1]) | q <- [0..qs-1]]
     allPairs = epsilonAllPairs enfa
-    enfa = ENFA qs t q0 f
 
 -- one nfa iteration, from the current states to the states after reading "a"
 next :: NFA -> Array Int (Array Int [Int]) -> [Int] -> Int -> [Int]
@@ -201,10 +203,7 @@ next (NFA qs t q0 f) alphAdjList set a = removeDupQ qs $ concatMap (adj !) set
     where adj = alphAdjList ! a
 
 acceptsNFA :: NFA -> [Int] -> Bool
-acceptsNFA (NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next nfa (alphAdjacencyList enfa)) [q0] w
-    where 
-        nfa = NFA qs t q0 f
-        enfa = ENFA qs t q0 f
+acceptsNFA nfa@(NFA qs t q0 f) w = (\set -> (not . null) (intersectQ qs set f)) $ foldl (next nfa (alphAdjacencyList (toENFA nfa))) [q0] w
 
 acceptsENFA :: ENFA -> [Int] -> Bool
 acceptsENFA enfa = acceptsNFA (removeEpsilons enfa)
@@ -249,23 +248,19 @@ searchNext (NFA qs t q0 f) alphAdjList set n [] = map MatchM finished
     where 
         finished = map (,n) $ reverse $ mergeLists $ map addedSet f
         addedSet i = if i == q0 then n : (set ! i) else set ! i
-searchNext (NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ searchNext nfa alphAdjList newSet (n+1) as
+searchNext nfa@(NFA qs t q0 f) alphAdjList set n (a:as) = map MatchM finished ++ searchNext nfa alphAdjList newSet (n+1) as
     where 
         -- transform states through transitions
         newSet = fmap mergeLists $ accumArray (flip (:)) [] (0,qs-1) $ [(r, addedSet q) | q <- [0..qs-1], r <- adj ! q]
         finished = map (,n) $ reverse $ mergeLists $ map addedSet f
         addedSet i = if i == q0 then n : (set ! i) else set ! i -- for every char a new run starting at q0 is created
         adj = alphAdjList ! a
-        nfa = NFA qs t q0 f
 
 -- unfortunately O(n^2), i'm not sure if better asymptotics are possible, since runs starting at each character have to be tracked
 -- this means that using this engine to search for regexes in a file containing >1000 characters could cause the program to be freeze
 -- a fix could be to only track the longest match, however i'm not sure how that would be done (TODO?)
 searchNFA :: NFA -> [Int] -> [MatchM]
-searchNFA (NFA qs t q0 f) = searchNext nfa (alphAdjacencyList enfa) (listArray (0,qs-1) $ replicate qs []) 0 
-    where 
-        nfa = NFA qs t q0 f
-        enfa = ENFA qs t q0 f
+searchNFA nfa@(NFA qs t q0 f) = searchNext nfa (alphAdjacencyList (toENFA nfa)) (listArray (0,qs-1) $ replicate qs []) 0 
 
 searchENFA :: ENFA -> [Int] -> [MatchM]
 searchENFA enfa = searchNFA (removeEpsilons enfa)
